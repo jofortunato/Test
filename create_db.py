@@ -34,7 +34,7 @@ def drawing_to_dataframe(drawing_path):
 	flat_columns_index = columns_index.to_flat_index()
 	columns_id = ["AUX","REF.", "PART NUMBER", "DESCRIPTION", "ORGANIZATION",\
 	 "NOTES"]
-	drawing_parts_list.columns = [columns_id[n] if n < 6 else e[0] \
+	drawing_parts_list.columns = [columns_id[n] if n < 6 else str(e[0]).strip() \
 	for n, e in enumerate(flat_columns_index)]
 
 	drawing_parts_list["NOTES"] = \
@@ -43,7 +43,7 @@ def drawing_to_dataframe(drawing_path):
 	# Clean and organize dataframe
 	drawing_parts_list.dropna("columns", how = "all", inplace = True)
 
-	# Add here: Function to deal with "-1 TO -29" type of qty columns.
+	drawing_parts_list = unstack_configurations(drawing_parts_list)
 
 	drawing_parts_list["DRAWING"] = drawing_path[-17:-5]
 
@@ -59,8 +59,8 @@ def drawing_to_dataframe(drawing_path):
 	drawing_parts_list["CONFIGURATION"] = drawing_parts_list["DRAWING"] +\
 	drawing_parts_list["CONFIGURATION"].astype(str)
 
-	ordered_columns = ["DRAWING", "CONFIGURATION", "REF.", "PART NUMBER",\
-	"DESCRIPTION", "ORGANIZATION", "NOTES", "QUANTITY"]
+	ordered_columns = ["DRAWING", "CONFIGURATION", "REF.",\
+	"PART NUMBER", "DESCRIPTION", "ORGANIZATION", "NOTES", "QUANTITY"]
 
 	drawing_parts_list = drawing_parts_list[ordered_columns]
 
@@ -84,20 +84,41 @@ def which_version_of_template(drawing_path):
 
 	return initial_line
 
+def unstack_configurations(drawing_dataframe):
+	"""
+	In some cases, for ease of visualization, multiple configurations are
+	stacked in the same column. For example:
+	Column title: "-2 TO -20", means that this column is applicable for each
+	configuration from -2 to -20.
+	This function will transform this kind of columns in multiple columns,
+	one for each configuration.
+	"""
+	configuration_pattern = r"-[0-9]+(TO|&)-[0-9]+"
+
+	for config in drawing_dataframe.columns[5:-1]:
+		if re.search(configuration_pattern, config.replace(" ", "")):
+			config_limits = re.findall("(?<=-)[0-9]+", config.replace(" ", ""))
+			for n in range(int(config_limits[0]), int(config_limits[1])+1):
+				column_name = "-" + str(n)
+				drawing_dataframe[column_name] = drawing_dataframe[config]
+			drawing_dataframe = drawing_dataframe.drop(columns = config)
+	return drawing_dataframe
+
 def main():
+	db_drawings = pd.DataFrame()
+
 	with os.scandir("Drawings/") as files:
 		for file in files:
 			if is_valid_drawing(file.name):
-				# Scan file and pass xls to pandas dataframe
 				path_to_file = os.curdir + "/Drawings/" + file.name
+
 				drawing_dataframe = drawing_to_dataframe(path_to_file)
+				db_drawings = db_drawings.append(drawing_dataframe,
+				ignore_index = True)
 
-				db_drawings.append(drawing_dataframe, ignore_index = True)
+	db_drawings = db_drawings.sort_values(by=["DRAWING", "CONFIGURATION",
+	 "REF."], ignore_index = True)
+	db_drawings.to_excel("items_DB.xlsx", index=False, sheet_name="Items DB")
+
 if __name__ == "__main__":
-	path_to_file = os.curdir + "/Drawings/" + "15P18DR30000.xlsx"
-	pd.set_option("display.max_rows", None, "display.max_columns", None)
-	dataframe_test = drawing_to_dataframe(path_to_file)
-
-	print(dataframe_test)
-	print(dataframe_test.columns)
-	#main()
+	main()
